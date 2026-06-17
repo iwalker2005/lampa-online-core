@@ -2559,6 +2559,34 @@
          * Вызывается Lampa из this.find() → sources[balanser].search(object, kp_id).
          * В нашем случае один «мета-балансёр», поэтому search — главная точка входа.
          */
+        // Резолв через локальный сервер-резолвер (balancer-server на 127.0.0.1:8787,
+        // проброшен adb reverse). Он резолвит СЕРВЕРНО — без CORS/JA3 — и отдаёт
+        // играбельные ссылки (collaps/hdrezka/cdnvideohub). Если сервер недоступен
+        // или пусто — фолбэк на локальный resolveAll в WebView.
+        function _resolveSources(query) {
+            var base = (typeof Lampa !== 'undefined' && Lampa.Storage)
+                ? Lampa.Storage.get('online_core_resolver', 'http://127.0.0.1:8787')
+                : 'http://127.0.0.1:8787';
+            if (!base) return BalancerCore.resolveAll(query, BalancerCore.lampaTransport);
+
+            var url = String(base).replace(/\/+$/, '') + '/resolve?kp=' + encodeURIComponent(query.kp || '') +
+                '&imdb=' + encodeURIComponent(query.imdb || '') +
+                '&tmdb=' + encodeURIComponent(query.tmdb || '') +
+                '&title=' + encodeURIComponent(query.title || '');
+
+            return BalancerCore.lampaTransport.fetch(url, { noProxy: true })
+                .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                .then(function (j) {
+                    if (!j || !j.ok || !j.data || !(j.data.sources || []).some(function (s) { return s.ok; })) {
+                        throw new Error('resolver empty');
+                    }
+                    return j.data;
+                })
+                .catch(function () {
+                    return BalancerCore.resolveAll(query, BalancerCore.lampaTransport);
+                });
+        }
+
         this.search = function () {
             var movie  = object.movie || {};
             var query  = {
@@ -2573,7 +2601,7 @@
 
             _this.loading(true);
 
-            BalancerCore.resolveAll(query, BalancerCore.lampaTransport)
+            _resolveSources(query)
                 .then(function (result) {
                     if (_destroyed) return;
                     _this.loading(false);
