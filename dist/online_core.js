@@ -2863,6 +2863,14 @@
                 playerItem.translate = { tracks: atracks };
             }
 
+            // ВРЕМЕННАЯ ДИАГНОСТИКА: показать URL, уходящий в плеер
+            try { Lampa.Noty.show('CORE→' + String(url).slice(0, 90)); } catch (e) {}
+
+            // VK CDN (vkvideo.cloud) требует Referer/Origin vk.com — иначе 403 и плеер стопается.
+            if (/vkvideo\.cloud|vk-cdn|okcdn/i.test(String(url))) {
+                playerItem.headers = { 'Referer': 'https://vk.com/', 'Origin': 'https://vk.com' };
+            }
+
             if (movie && movie.id) Lampa.Favorite.add('history', movie, 100);
             Lampa.Player.play(playerItem);
             Lampa.Player.playlist([playerItem]);
