@@ -2250,7 +2250,7 @@
         // Домены с ОТКРЫТЫМ CORS (api.* балансёров) — всегда напрямую: воркер
         // nb557/fx666 их отвергает ("Malformed URL"), а сами они отдают CORS:*.
         // stravers/allarknow (плеер Alloha) — тоже напрямую (рабочий путь на Android).
-        var direct = opts.noProxy || /apbugall\.org|synchroncode\.com|ortified\.ws|embess\.ws|kinogram\.best|femd\.ws|kodik-api\.com|plapi\.cdnvideohub\.com|hdrezka\.me|rezka\.ag|stravers\.|allarknow\.|\.allarknet\.|\bbnsi\b/i.test(url);
+        var direct = opts.noProxy || /apbugall\.org|synchroncode\.com|ortified\.ws|embess\.ws|kinogram\.best|femd\.ws|kodik-api\.com|kodikplayer\.com|kodikres\.com|solodcdn\.com|plapi\.cdnvideohub\.com|hdrezka\.me|rezka\.ag|stravers\.|allarknow\.|\.allarknet\.|\bbnsi\b/i.test(url);
         var finalUrl = (proxy && !direct) ? proxyLink(url, proxy, proxy_enc, 'enc2t') : url;
 
         // Тело POST (false → нет тела, как принято в online_mod.js)
