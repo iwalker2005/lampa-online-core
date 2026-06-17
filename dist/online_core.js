@@ -2464,6 +2464,12 @@
         // Словарь для component.filter (аналог filter_items)
         var filter_items = {};
 
+        // ── Каркас Lampa-компонента (Scroll + Explorer + Filter) ──────────────
+        var scroll = new Lampa.Scroll({ mask: true, over: true });
+        var files  = new Lampa.Explorer(object);
+        var filter = new Lampa.Filter(object);
+        var last;
+
         // ── Поиск ─────────────────────────────────────────────────────────────
 
         /**
@@ -2938,46 +2944,159 @@
          * @param {Object} a  — { stype: 'voice'|'season'|'source', … }
          * @param {Object} b  — { index: number, title: string }
          */
-        this.filter = function (type, a, b) {
-            if (!a || !b) return;
-            var ctx = _this._coreCtx;
+        // ── Построение фильтра (источник / озвучка / сезон) ───────────────────
+        // ВАЖНО: build-функции вызывают _this.filter(filter_items, choice).
+        this.filter = function (items, ch) {
+            if (items) filter_items = items;
+            if (ch)    choice = ch;
+
+            var select = [];
+            select.push({ title: Lampa.Lang.translate('torrent_parser_reset'), reset: true });
+
+            var add = function (type, title) {
+                var list = filter_items[type];
+                if (!list || !list.length) return;
+                var subitems = list.map(function (name, i) {
+                    return { title: name, selected: choice[type] === i, index: i };
+                });
+                select.push({
+                    title:    title,
+                    subtitle: list[choice[type]] || list[0],
+                    items:    subitems,
+                    stype:    type
+                });
+            };
+
+            add('source', 'Источник');
+            add('voice',  Lampa.Lang.translate('torrent_parser_voice'));
+            add('season', Lampa.Lang.translate('torrent_serial_season'));
+
+            filter.set('filter', select);
+
+            var chosen = [];
+            if (filter_items.voice  && filter_items.voice.length  > 1) chosen.push(filter_items.voice[choice.voice]);
+            if (filter_items.season && filter_items.season.length > 1) chosen.push(Lampa.Lang.translate('torrent_serial_season') + ': ' + filter_items.season[choice.season]);
+            filter.chosen('filter', chosen);
+        };
+
+        // Обработка выбора в фильтре (источник / озвучка / сезон / сброс)
+        function onFilterSelect(type, a, b) {
+            if (type !== 'filter') return;
+
+            if (a.reset) {
+                choice = { source: 0, voice: 0, season: 0 };
+                _this.search();
+                return;
+            }
+            if (!b) return;
 
             choice[a.stype] = b.index;
+            var ctx = _this._coreCtx;
 
-            if (!ctx) return; // ещё не открыт сериальный контекст
+            if (a.stype === 'source') {
+                var src = _okSources[choice.source];
+                if (src) { _this.reset(); _openSource(src); }
+            } else if (ctx) {
+                _this.reset();
+                _buildEpisodeLevel(ctx.seasons[choice.season], choice.voice, ctx.voiceNames, ctx.movie, ctx.title, ctx.source);
+            }
 
-            _this.reset();
-            _buildEpisodeLevel(
-                ctx.seasons[choice.season],
-                choice.voice,
-                ctx.voiceNames,
-                ctx.movie,
-                ctx.title,
-                ctx.source
-            );
+            _this.filter(filter_items, choice);
+            setTimeout(function () {
+                if ($('body').hasClass('selectbox--open')) Lampa.Select.close();
+            }, 10);
+        }
 
-            _this.saveChoice && _this.saveChoice(choice);
+        // ── Жизненный цикл Lampa-компонента ───────────────────────────────────
+        this.create = function () {
+            this.activity.loader(true);
+
+            filter.onSelect = onFilterSelect;
+            filter.onBack   = function () { _this.start(); };
+            filter.onSearch = function (value) {
+                Lampa.Activity.replace({ search: value, clarification: true });
+            };
+
+            files.appendHead(filter.render());
+            files.appendFiles(scroll.render());
+
+            this.search();
+            return this.render();
         };
 
-        /**
-         * Сброс фильтра к значениям по умолчанию.
-         * Паттерн: this.reset вызывается кнопкой «Сбросить» в фильтре Lampa.
-         */
-        this.reset = function () {
-            choice = { source: 0, voice: 0, season: 0 };
-            var ctx = _this._coreCtx;
-            if (ctx) {
-                _this.filter(filter_items, choice);
-                _buildEpisodeLevel(
-                    ctx.seasons[0],
-                    0,
-                    ctx.voiceNames,
-                    ctx.movie,
-                    ctx.title,
-                    ctx.source
-                );
+        this.loading = function (status) {
+            if (status) {
+                this.activity.loader(true);
+            } else {
+                this.activity.loader(false);
+                if (Lampa.Activity.active().activity === this.activity) this.activity.toggle();
             }
         };
+
+        // Очистить список перед перерисовкой уровня
+        this.reset = function () {
+            last = filter.render().find('.selector').eq(0)[0];
+            scroll.render().find('.empty').remove();
+            scroll.clear();
+            scroll.reset();
+        };
+
+        this.append = function (item) {
+            item.on('hover:focus', function (e) {
+                last = e.target;
+                scroll.update($(e.target), true);
+            });
+            scroll.append(item);
+        };
+
+        this.empty = function (msg) {
+            var empty = Lampa.Template.get('list_empty');
+            if (msg) empty.find('.empty__descr').text(msg);
+            scroll.append(empty);
+            this.activity.loader(false);
+        };
+
+        this.start = function (first_select) {
+            if (Lampa.Activity.active().activity !== this.activity) return;
+
+            if (first_select) last = scroll.render().find('.selector').eq(0)[0];
+
+            Lampa.Background.immediately(Lampa.Utils.cardImgBackground(object.movie || {}));
+
+            Lampa.Controller.add('content', {
+                toggle: function () {
+                    Lampa.Controller.collectionSet(scroll.render(), files.render());
+                    Lampa.Controller.collectionFocus(last || false, scroll.render());
+                },
+                up: function () {
+                    if (Navigator.canmove('up')) Navigator.move('up');
+                    else Lampa.Controller.toggle('head');
+                },
+                down: function () { Navigator.move('down'); },
+                right: function () {
+                    if (Navigator.canmove('right')) Navigator.move('right');
+                    else filter.show(Lampa.Lang.translate('title_filter'), 'filter');
+                },
+                left: function () {
+                    if (Navigator.canmove('left')) Navigator.move('left');
+                    else Lampa.Controller.toggle('menu');
+                },
+                back: this.back
+            });
+
+            Lampa.Controller.toggle('content');
+        };
+
+        this.render = function () {
+            return files.render();
+        };
+
+        this.back = function () {
+            Lampa.Activity.backward();
+        };
+
+        this.pause = function () {};
+        this.stop  = function () {};
 
         /**
          * Освободить ресурсы при уходе с активности.
@@ -2987,6 +3106,8 @@
             _result    = null;
             _okSources = [];
             _this._coreCtx = null;
+            if (files)  files.destroy();
+            if (scroll) scroll.destroy();
         };
     }
 
