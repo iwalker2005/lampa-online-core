@@ -3057,33 +3057,39 @@
                 '<span>Смотреть (core)</span>' +
             '</div>';
 
-        // Вставка с фолбэками (надёжный паттерн из online_mod.js):
-        //   1. После .view--torrent (если торренты есть)
-        //   2. В .full-start-new__buttons / .full-start__buttons
-        //   3. После первой из .button--play / .view--trailer / .full-start__button
-        Lampa.Listener.follow('full', function (e) {
-            if (e.type !== 'complite') return;
+        // Вставка кнопки в .buttons--container (как в ReYohoho — чтобы кнопка
+        // попала в общий список «Источник»), с фолбэками для других сборок Lampa.
+        function appendCoreButton(root, movie) {
+            if (!root || !root.find) return;
+            if (root.find('.view--online_core').length) return; // уже добавлена
 
             var btn = $(buttonHtml);
+            btn.on('hover:enter', function () { openOnlineCore(movie || {}); });
 
-            btn.on('hover:enter', function () {
-                openOnlineCore(e.data.movie);
-            });
+            var torrent = root.find('.buttons--container .view--torrent');
+            if (torrent.length) { torrent.after(btn); return; }
 
-            var bsRoot   = e.object.activity.render();
-            var bsAnchor = bsRoot.find('.view--torrent');
+            var container = root.find('.buttons--container');
+            if (container.length) { container.append(btn); return; }
 
-            if (bsAnchor.length) {
-                bsAnchor.after(btn);
-            } else {
-                var bsBox = bsRoot.find('.full-start-new__buttons, .full-start__buttons');
-                if (bsBox.length) {
-                    bsBox.append(btn);
-                } else {
-                    bsRoot.find('.button--play, .view--trailer, .full-start__button').first().after(btn);
-                }
-            }
+            var box = root.find('.full-start-new__buttons, .full-start__buttons');
+            if (box.length) { box.append(btn); return; }
+
+            root.find('.button--play, .view--trailer, .full-start__button').first().after(btn);
+        }
+
+        Lampa.Listener.follow('full', function (e) {
+            if (e.type !== 'complite') return;
+            appendCoreButton(e.object.activity.render(), e.data && e.data.movie ? e.data.movie : {});
         });
+
+        // Карточка уже открыта (плагин загрузился после неё) — добавляем сразу.
+        try {
+            var active = Lampa.Activity.active && Lampa.Activity.active();
+            if (active && active.component === 'full' && active.activity && active.activity.render) {
+                appendCoreButton(active.activity.render(), active.card || active.movie || {});
+            }
+        } catch (err) {}
     }
 
     // ─── Ждём готовности приложения ───────────────────────────────────────────
