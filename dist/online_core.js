@@ -1339,6 +1339,26 @@
     },
 
     /**
+     * Добыть kinopoisk_id по imdb/tmdb через Alloha (apbugall возвращает id_kp).
+     * Токен «кряк» личного не требует; идём НАПРЯМУЮ — apbugall отдаёт CORS:*.
+     * @returns {Promise<string>}  kinopoisk_id или ''
+     */
+    resolveKpId: function (query, transport) {
+      var url;
+      if (query.imdb)      url = 'https://api.apbugall.org/?token=' + ALLOHA_TOKEN + '&imdb=' + encodeURIComponent(query.imdb);
+      else if (query.tmdb) url = 'https://api.apbugall.org/?token=' + ALLOHA_TOKEN + '&tmdb=' + encodeURIComponent(query.tmdb);
+      else return Promise.resolve('');
+
+      return transport.fetch(url, { noProxy: true }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (d) {
+        var kp = d && d.data && (d.data.id_kp || d.data.alternative_id_kp);
+        return kp ? String(kp) : '';
+      }).catch(function () { return ''; });
+    },
+
+    /**
      * @param {{ kp?: string }} query
      * @param {object} transport
      * @returns {Promise<import('../schema.js').Source>}
@@ -2003,11 +2023,21 @@
   function resolveAll(query, transport) {
     // Шаг 0: если нет kinopoisk_id (TMDB-карточка) — добываем его через Kodik,
     // иначе 5 из 6 балансеров вернут «kp обязателен».
-    var pre = (!query.kp && (query.imdb || query.title))
-      ? _kodik.kodikAdapter.resolveKpId(query, transport).then(function (kp) {
-          return kp ? { kp: kp, title: query.title, imdb: query.imdb } : query;
-        })
-      : Promise.resolve(query);
+    function _withKp(kp) {
+      return { kp: kp, title: query.title, imdb: query.imdb, tmdb: query.tmdb };
+    }
+    var pre;
+    if (query.kp || (!query.imdb && !query.title && !query.tmdb)) {
+      pre = Promise.resolve(query);
+    } else {
+      // 1) Alloha/apbugall (жив, по imdb/tmdb отдаёт id_kp); 2) Kodik — запасной
+      pre = _alloha.allohaAdapter.resolveKpId(query, transport).then(function (kp) {
+        if (kp) return _withKp(kp);
+        return _kodik.kodikAdapter.resolveKpId(query, transport).then(function (kp2) {
+          return kp2 ? _withKp(kp2) : query;
+        });
+      });
+    }
 
     return pre.then(function (q) {
       var promises = adapters.map(function (adapter) {
@@ -2210,8 +2240,9 @@
           nativeHeaders = directHeaders;
         }
 
-        // Итоговый URL (через воркер enc2t если есть proxy)
-        var finalUrl = proxy ? proxyLink(url, proxy, proxy_enc, 'enc2t') : url;
+        // apbugall отдаёт CORS:* и не проксируется воркером (Malformed URL) → напрямую.
+        var direct = opts.noProxy || /apbugall\.org/i.test(url);
+        var finalUrl = (proxy && !direct) ? proxyLink(url, proxy, proxy_enc, 'enc2t') : url;
 
         // Тело POST (false → нет тела, как принято в online_mod.js)
         var postBody = opts.body || false;
@@ -2518,7 +2549,9 @@
                 // Подставлять его в kp нельзя — балансеры искали по чужому id → «Пусто».
                 kp:    String(movie.kinopoisk_id || movie.kinopoisk || ''),
                 title: movie.title || movie.name || movie.original_title || movie.original_name || object.search || '',
-                imdb:  movie.imdb_id || ''
+                imdb:  movie.imdb_id || '',
+                // tmdb-id карточки (для резолва KP через Alloha, если нет imdb)
+                tmdb:  (movie.source === 'tmdb' || movie.source === 'cub') ? String(movie.id || '') : ''
             };
 
             _this.loading(true);
