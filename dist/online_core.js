@@ -2569,22 +2569,41 @@
                 : 'http://127.0.0.1:8787';
             if (!base) return BalancerCore.resolveAll(query, BalancerCore.lampaTransport);
 
-            var url = String(base).replace(/\/+$/, '') + '/resolve?kp=' + encodeURIComponent(query.kp || '') +
-                '&imdb=' + encodeURIComponent(query.imdb || '') +
-                '&tmdb=' + encodeURIComponent(query.tmdb || '') +
-                '&title=' + encodeURIComponent(query.title || '');
+            // Резолвер на сервере требует kp. У TMDB-карточек kp пуст — добываем его
+            // ЛОКАЛЬНО через Alloha (apbugall по imdb/tmdb, работает с RU-IP устройства),
+            // потом зовём резолвер уже с kp → он отдаёт играбельные collaps/cdnvideohub/hdrezka.
+            var kpPromise;
+            if (query.kp) {
+                kpPromise = Promise.resolve(query.kp);
+            } else if (BalancerCore.allohaAdapter && BalancerCore.allohaAdapter.resolveKpId) {
+                kpPromise = BalancerCore.allohaAdapter.resolveKpId(query, BalancerCore.lampaTransport)
+                    .catch(function () { return ''; });
+            } else {
+                kpPromise = Promise.resolve('');
+            }
 
-            return BalancerCore.lampaTransport.fetch(url, { noProxy: true })
-                .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-                .then(function (j) {
-                    if (!j || !j.ok || !j.data || !(j.data.sources || []).some(function (s) { return s.ok; })) {
-                        throw new Error('resolver empty');
-                    }
-                    return j.data;
-                })
-                .catch(function () {
+            return kpPromise.then(function (kp) {
+                var rkp = kp || query.kp || '';
+                if (!rkp && !query.title) {
                     return BalancerCore.resolveAll(query, BalancerCore.lampaTransport);
-                });
+                }
+                var url = String(base).replace(/\/+$/, '') + '/resolve?kp=' + encodeURIComponent(rkp) +
+                    '&imdb=' + encodeURIComponent(query.imdb || '') +
+                    '&tmdb=' + encodeURIComponent(query.tmdb || '') +
+                    '&title=' + encodeURIComponent(query.title || '');
+
+                return BalancerCore.lampaTransport.fetch(url, { noProxy: true })
+                    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                    .then(function (j) {
+                        if (!j || !j.ok || !j.data || !(j.data.sources || []).some(function (s) { return s.ok; })) {
+                            throw new Error('resolver empty');
+                        }
+                        return j.data;
+                    })
+                    .catch(function () {
+                        return BalancerCore.resolveAll(query, BalancerCore.lampaTransport);
+                    });
+            });
         }
 
         this.search = function () {
