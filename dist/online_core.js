@@ -245,7 +245,11 @@
    * @returns {string}
    */
   function deriveToken(id, secret) {
-    if (id === 'kodik') return decodeSecret(TOK_KODIK, 'find your own token');
+    if (id === 'kodik') {
+      // Личный токен пользователя из настроек (полный каталог); встроенный — fallback (ограничен).
+      var userTok = (typeof Lampa !== 'undefined' && Lampa.Storage && Lampa.Storage.get('online_core_kodik_token', '')) || '';
+      return (userTok + '').trim() || decodeSecret(TOK_KODIK, 'find your own token');
+    }
     if (id === 'alloha') return (secret ? decodeSecret(TOK_ALLOHA, secret) : '') || TOK_ALLOHA_CRACKED;
     return '';
   }
@@ -747,7 +751,7 @@
   }
 
   var FEMD_POOL = /^(?:https?:)?\/\/(?:[a-z0-9]+\.)?(?:delivembed\.cc|buildplayer\.com|embedstorage\.net|mir-dikogo-zapada\.com|multikland\.net|placehere\.link|ameytools\.club|(?:tobaco|topdbltj|delivembd|hostemb|loadbox|getcodes|strvid|ebder|framprox|embprox|bedemp2|embr|lessornot|linktodo|insertunit|marts|ninsel|embess|luxembd|domem|atomics|namy|variyt|zenithjs|ortified)\.ws)\b/i;
-  var FEMD_LIVE = 'https://api.femd.ws';
+  var FEMD_LIVE = 'https://api.embess.ws';
 
   function actualizeUrl(url) {
     if (FEMD_POOL.test(url)) return url.replace(/^(?:https?:)?\/\/[^/]+/i, FEMD_LIVE);
@@ -777,8 +781,10 @@
         return Promise.resolve({ balancer: 'collaps', ok: false, error: 'kp обязателен', cdn: 'interkh', castable: true, resolveOn: 'any' });
       }
 
-      var primaryUrl  = 'https://api.kinogram.best/embed/kp/' + kp;
-      var reserveUrl  = 'https://api.synchroncode.com/embed/kp/' + kp;
+      // kinogram.best/femd.ws теперь отдают 422 на не-браузерные запросы;
+      // рабочие зеркала того же VenomPlayer/interkh — synchroncode.com / ortified.ws.
+      var primaryUrl  = 'https://api.synchroncode.com/embed/kp/' + kp;
+      var reserveUrl  = 'https://api.ortified.ws/embed/kp/' + kp;
 
       function tryUrl(url, isReserve) {
         url = actualizeUrl(url);
@@ -838,7 +844,7 @@
   }
 
   var FEMD_POOL = /^(?:https?:)?\/\/(?:[a-z0-9]+\.)?(?:delivembed\.cc|buildplayer\.com|embedstorage\.net|mir-dikogo-zapada\.com|multikland\.net|placehere\.link|ameytools\.club|(?:tobaco|topdbltj|delivembd|hostemb|loadbox|getcodes|strvid|ebder|framprox|embprox|bedemp2|embr|lessornot|linktodo|insertunit|marts|ninsel|embess|luxembd|domem|atomics|namy|variyt|zenithjs|ortified)\.ws)\b/i;
-  var FEMD_LIVE = 'https://api.femd.ws';
+  var FEMD_LIVE = 'https://api.embess.ws';
 
   function actualizeUrl(url) {
     if (FEMD_POOL.test(url)) return url.replace(/^(?:https?:)?\/\/[^/]+/i, FEMD_LIVE);
@@ -868,7 +874,7 @@
         return Promise.resolve({ balancer: 'femd', ok: false, error: 'kp обязателен', cdn: 'interkh', castable: true, resolveOn: 'any' });
       }
 
-      var url = actualizeUrl('https://api.femd.ws/embed/kp/' + kp);
+      var url = actualizeUrl('https://api.embess.ws/embed/kp/' + kp);
 
       return transport.fetch(url, {}).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2244,7 +2250,7 @@
         // Домены с ОТКРЫТЫМ CORS (api.* балансёров) — всегда напрямую: воркер
         // nb557/fx666 их отвергает ("Malformed URL"), а сами они отдают CORS:*.
         // stravers/allarknow (плеер Alloha) — тоже напрямую (рабочий путь на Android).
-        var direct = opts.noProxy || /apbugall\.org|kinogram\.best|synchroncode\.com|femd\.ws|kodik-api\.com|plapi\.cdnvideohub\.com|stravers\.|allarknow\.|\.allarknet\.|\bbnsi\b/i.test(url);
+        var direct = opts.noProxy || /apbugall\.org|synchroncode\.com|ortified\.ws|embess\.ws|kinogram\.best|femd\.ws|kodik-api\.com|plapi\.cdnvideohub\.com|hdrezka\.me|rezka\.ag|stravers\.|allarknow\.|\.allarknet\.|\bbnsi\b/i.test(url);
         var finalUrl = (proxy && !direct) ? proxyLink(url, proxy, proxy_enc, 'enc2t') : url;
 
         // Тело POST (false → нет тела, как принято в online_mod.js)
@@ -3291,6 +3297,20 @@
             }
         };
         Lampa.Manifest.plugins = manifest;
+
+        // ── Настройка: личный токен Kodik (полный каталог) ────────────────────
+        try {
+            if (Lampa.SettingsApi) {
+                Lampa.SettingsApi.addParam({
+                    component: 'interface',
+                    param: { name: 'online_core_kodik_token', type: 'input', 'default': '' },
+                    field: {
+                        name: 'Kodik — токен API',
+                        description: 'Свой токен Kodik = полный каталог. Пусто = встроенный (ограничен, в основном аниме).'
+                    }
+                });
+            }
+        } catch (e) {}
 
         // ── Кнопка на карточке — паттерн online_mod.js ────────────────────────
         // SVG-иконка (повторяет иконку online_mod.js для визуальной согласованности).
