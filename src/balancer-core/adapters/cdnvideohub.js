@@ -118,7 +118,7 @@
             });
             return { num: sNum, episodes: episodes };
           });
-          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', type: 'serial', seasons: seasons };
+          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', audioMode: 'separate', type: 'serial', seasons: seasons };
         }
 
         // ФИЛЬМ
@@ -131,7 +131,7 @@
         })).then(function (voices) {
           voices = voices.filter(Boolean);
           if (!voices.length) return fail('нет живых vkId или sources пусты');
-          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', type: 'movie', voices: voices };
+          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', audioMode: 'separate', type: 'movie', voices: voices };
         });
       }).catch(function (e) {
         return fail(e);

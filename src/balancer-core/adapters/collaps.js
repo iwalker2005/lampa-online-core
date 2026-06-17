@@ -64,7 +64,7 @@
                              (parsed.serial && parsed.seasons && parsed.seasons.length));
           if (!ok && !isReserve) return tryUrl(reserveUrl, true);
           if (!ok) return { balancer: 'collaps', ok: false, error: 'контент не найден', cdn: 'interkh', castable: true, resolveOn: 'any' };
-          var src = { balancer: 'collaps', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any' };
+          var src = { balancer: 'collaps', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any', audioMode: 'tracks' };
           if (parsed.serial) {
             src.type = 'serial';
             src.seasons = parsed.seasons;

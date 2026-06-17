@@ -235,7 +235,7 @@
             });
             return { num: sNum, episodes: episodes };
           });
-          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', type: 'serial', seasons: seasons };
+          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'serial', seasons: seasons };
         }
 
         // ФИЛЬМ: разворачиваем все озвучки сразу
@@ -248,7 +248,7 @@
           var all = [];
           results.forEach(function (vs) { if (vs) vs.forEach(function (v) { all.push(v); }); });
           if (!all.length) return fail('не удалось декодировать ни одного потока');
-          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', type: 'movie', voices: all };
+          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'movie', voices: all };
         });
       }).catch(function (e) {
         return fail(e);

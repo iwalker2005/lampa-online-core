@@ -57,7 +57,7 @@
         var ok = parsed && ((parsed.voices && parsed.voices.length) ||
                            (parsed.serial && parsed.seasons && parsed.seasons.length));
         if (!ok) return { balancer: 'femd', ok: false, error: 'контент не найден', cdn: 'interkh', castable: true, resolveOn: 'any' };
-        var src = { balancer: 'femd', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any' };
+        var src = { balancer: 'femd', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any', audioMode: 'tracks' };
         if (parsed.serial) {
           src.type = 'serial';
           src.seasons = parsed.seasons;

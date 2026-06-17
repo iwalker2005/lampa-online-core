@@ -272,7 +272,7 @@
                   result = rezkaSerialFromHtml(content, filmId, trs, favs, transport);
                 }
                 if (!result) throw new Error('не удалось распарсить структуру сериала');
-                return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', type: 'serial', seasons: result.seasons };
+                return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'serial', seasons: result.seasons };
               });
             }
 
@@ -303,7 +303,7 @@
             return Promise.all(voicePromises).then(function (vs) {
               var voices = vs.filter(Boolean);
               if (!voices.length) throw new Error('нет озвучек после get_movie');
-              return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', type: 'movie', voices: voices };
+              return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'movie', voices: voices };
             });
           });
         });

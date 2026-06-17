@@ -32,12 +32,17 @@
   var ALLOHA_TOKEN = _secrets ? _secrets.TOK_ALLOHA_CRACKED : 'd317441359e505c343c2063edc97e7';
 
   // ─── Парсинг hlsSource из ответа /bnsi/movies ────────────────────────────────
+  // Возвращает одну voice с audioTracks (audioMode="tracks"):
+  // hlsSource[0] — мастер-поток (все дорожки в одном HLS); label = имя дорожки.
   function parseHlsSource(json, av1) {
     var hs = (json && json.hlsSource) || [];
     var rawTracks = (json && json.tracks) || [];
     var sharedSubs = _schema.allohaParseTracksSubs(rawTracks);
-    var voices = [];
-    hs.forEach(function (s) {
+
+    // Берём первый поток с URL как мастер (все качества из него)
+    var masterQ = null, masterName = null;
+    var audioTracks = [];
+    hs.forEach(function (s, idx) {
       var q = {}, qual = s.quality || {};
       Object.keys(qual).forEach(function (k) {
         var url = String(qual[k] || '').split(' or ')[0].trim();
@@ -47,12 +52,16 @@
         q[k + 'p'] = url;
       });
       if (Object.keys(q).length) {
-        var voice = { name: s.label || 'Alloha', id: s.label, qualities: q };
-        if (sharedSubs.length) voice.subtitles = sharedSubs;
-        voices.push(voice);
+        if (!masterQ) { masterQ = q; masterName = s.label || 'Alloha'; }
+        audioTracks.push({ name: s.label || ('Дорожка ' + (idx + 1)), index: idx });
       }
     });
-    return voices.length ? voices : null;
+
+    if (!masterQ) return null;
+
+    var voice = { name: masterName, id: masterName, qualities: masterQ, audioTracks: audioTracks };
+    if (sharedSubs.length) voice.subtitles = sharedSubs;
+    return [voice];
   }
 
   // ─── Получить поток через borth+bnsi (no-tab, для Node) ─────────────────────
@@ -174,56 +183,93 @@
             var episodes = eNums.map(function (eNum) {
               var epObj = eps[String(eNum)];
               var tr = (epObj && epObj.translation) || {};
-              var voices = Object.keys(tr).map(function (tid) {
-                var trObj = tr[tid];
-                if (!trObj || !trObj.iframe) return null;
-                var q = {};
-                q['плеер · iframe'] = trObj.iframe;
-                return { name: nameMap[tid] || trObj.name || ('Озвучка ' + tid), id: tid, qualities: q,
-                  // resolve() для ленивого borth-резолва
-                  resolveStream: function () { return fetchBnsiStream(trObj.iframe, transport); }
-                };
-              }).filter(Boolean);
-              return { num: eNum, title: 'Серия ' + eNum, voices: voices };
+              // audioMode="tracks": одна voice per серия с audioTracks по озвучкам
+              var tids = Object.keys(tr).filter(function (tid) { return tr[tid] && tr[tid].iframe; });
+              var epVoices = [];
+              if (tids.length) {
+                var masterTid = tids[0];
+                var masterTr  = tr[masterTid];
+                var masterUrl = masterTr.iframe;
+                var masterQ   = {};
+                masterQ['плеер · iframe'] = masterUrl;
+                var audioTracks = tids.map(function (tid, i) {
+                  var t = tr[tid];
+                  return {
+                    name: nameMap[tid] || t.name || ('Озвучка ' + tid),
+                    id: tid,
+                    index: i,
+                    resolveStream: (function (u) {
+                      return function () { return fetchBnsiStream(u, transport); };
+                    }(t.iframe))
+                  };
+                });
+                epVoices = [{
+                  name: nameMap[masterTid] || masterTr.name || ('Озвучка ' + masterTid),
+                  id: masterTid,
+                  qualities: masterQ,
+                  audioTracks: audioTracks,
+                  resolve: function () { return fetchBnsiStream(masterUrl, transport); }
+                }];
+              }
+              return { num: eNum, title: 'Серия ' + eNum, voices: epVoices };
             });
             return { num: sNum, episodes: episodes.filter(Boolean) };
           }).filter(function (s) { return s && s.episodes.length; });
           if (seasons.length) {
-            return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', type: 'serial', seasons: seasons };
+            return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', audioMode: 'tracks', type: 'serial', seasons: seasons };
           }
         }
 
-        // ФИЛЬМ: translation_iframe
-        var ti = d.data.translation_iframe, voices = [];
+        // ФИЛЬМ: translation_iframe → audioMode="tracks", одна voice + audioTracks
+        var ti = d.data.translation_iframe;
+        var masterVoice = null;
+
         if (ti && typeof ti === 'object') {
-          Object.keys(ti).forEach(function (k) {
-            var t = ti[k];
-            if (t && t.iframe) {
-              var iframeUrl = t.iframe;
-              var q = {};
-              q[(t.quality || 'плеер') + ' · iframe'] = iframeUrl;
-              voices.push({
+          var tiKeys = Object.keys(ti).filter(function (k) { return ti[k] && ti[k].iframe; });
+          if (tiKeys.length) {
+            // Первый ключ — мастер (его iframe идёт в qualities)
+            var masterKey = tiKeys[0];
+            var masterTi  = ti[masterKey];
+            var masterUrl = masterTi.iframe;
+            var masterQual = {};
+            masterQual[(masterTi.quality || 'плеер') + ' · iframe'] = masterUrl;
+
+            var audioTracks = tiKeys.map(function (k, i) {
+              var t = ti[k];
+              return {
                 name: t.name || ('Озвучка ' + k),
                 id: k,
-                qualities: q,
-                // Ленивый borth-резолв для качеств
-                resolve: function () { return fetchBnsiStream(iframeUrl, transport); }
-              });
-            }
-          });
+                index: i,
+                // ленивый resolve дорожки (borth на клик)
+                resolveStream: (function (u) {
+                  return function () { return fetchBnsiStream(u, transport); };
+                }(t.iframe))
+              };
+            });
+
+            masterVoice = {
+              name: masterTi.name || ('Озвучка ' + masterKey),
+              id: masterKey,
+              qualities: masterQual,
+              audioTracks: audioTracks,
+              resolve: function () { return fetchBnsiStream(masterUrl, transport); }
+            };
+          }
         }
-        if (!voices.length && d.data.iframe) {
+
+        if (!masterVoice && d.data.iframe) {
           var q0 = {};
           q0['плеер · iframe'] = d.data.iframe;
           var url0 = d.data.iframe;
-          voices.push({
+          masterVoice = {
             name: 'Плеер', id: 0, qualities: q0,
+            audioTracks: [{ name: 'Плеер', index: 0 }],
             resolve: function () { return fetchBnsiStream(url0, transport); }
-          });
+          };
         }
 
-        if (!voices.length) return fail('нет iframe в ответе apbugall');
-        return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', type: 'movie', voices: voices };
+        if (!masterVoice) return fail('нет iframe в ответе apbugall');
+        return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', audioMode: 'tracks', type: 'movie', voices: [masterVoice] };
       }).catch(function (e) {
         return fail(e);
       });

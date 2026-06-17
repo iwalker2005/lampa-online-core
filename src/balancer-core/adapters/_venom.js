@@ -15,6 +15,10 @@
     _schema = g.BalancerCore;
   }
 
+  function makeTracksVoice(q, names, subs) {
+    return _schema.makeTracksVoice(q, names, subs);
+  }
+
   function collapsParseCC(ccArr) {
     return _schema.collapsParseCC(ccArr);
   }
@@ -48,11 +52,7 @@
         var audioNames = (ep.audio && Array.isArray(ep.audio.names) && ep.audio.names.length)
           ? ep.audio.names : ['Основной'];
         var epSubs = collapsParseCC(ep.cc);
-        var voices = audioNames.map(function (n, idx) {
-          var v = { name: n, id: idx, qualities: q };
-          if (epSubs.length) v.subtitles = epSubs;
-          return v;
-        });
+        var voices = [ makeTracksVoice(q, audioNames, epSubs) ];
         episodes.push({ num: epNum, title: ep.title || ('Серия ' + epNum), voices: voices });
       });
       if (episodes.length) {
@@ -104,11 +104,7 @@
     }
 
     return {
-      voices: names.map(function (n, i) {
-        var v = { name: n, id: i, qualities: q };
-        if (filmSubs.length) v.subtitles = filmSubs;
-        return v;
-      })
+      voices: [ makeTracksVoice(q, names, filmSubs) ]
     };
   }
 

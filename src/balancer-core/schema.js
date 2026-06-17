@@ -5,7 +5,7 @@
  *
  * @typedef {{ lang: string, label: string, url: string, format: 'vtt'|'srt' }} SubtitleTrack
  *
- * @typedef {{ name: string, lang: string }} AudioTrack
+ * @typedef {{ name: string, lang?: string, index?: number }} AudioTrack
  *
  * @typedef {{
  *   name: string,
@@ -31,6 +31,7 @@
  *   cdn: string,
  *   castable: boolean,
  *   resolveOn: 'device'|'any',
+ *   audioMode?: 'separate'|'tracks',
  *   voices?: Voice[],
  *   seasons?: Season[]
  * }} Source
@@ -114,6 +115,23 @@
   }
 
   /**
+   * Построить одну Voice-запись для audioMode="tracks":
+   * одна мастер-запись с audioTracks из массива имён.
+   *
+   * @param {Object.<string,string>} qualities  — мастер qualities (hls/dash)
+   * @param {string[]} names                   — имена озвучек (индекс = index в аудиодорожке)
+   * @param {SubtitleTrack[]} [subtitles]
+   * @returns {Voice}
+   */
+  function makeTracksVoice(qualities, names, subtitles) {
+    var firstName = (names && names.length) ? names[0] : 'Мультиаудио';
+    var audioTracks = (names || []).map(function (n, i) { return { name: n, index: i }; });
+    var voice = { name: firstName, id: 0, qualities: qualities, audioTracks: audioTracks };
+    if (subtitles && subtitles.length) voice.subtitles = subtitles;
+    return voice;
+  }
+
+  /**
    * Парсинг tracks:[{kind,label,src}] из ответа Alloha /bnsi/movies.
    * @param {Array} tracks
    * @returns {SubtitleTrack[]}
@@ -136,7 +154,8 @@
     subFormatFromUrl: subFormatFromUrl,
     rezkaParseSubtitles: rezkaParseSubtitles,
     collapsParseCC: collapsParseCC,
-    allohaParseTracksSubs: allohaParseTracksSubs
+    allohaParseTracksSubs: allohaParseTracksSubs,
+    makeTracksVoice: makeTracksVoice
   };
 
   if (typeof module !== 'undefined' && module.exports) {

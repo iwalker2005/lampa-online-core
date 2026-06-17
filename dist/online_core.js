@@ -20,7 +20,7 @@
  *
  * @typedef {{ lang: string, label: string, url: string, format: 'vtt'|'srt' }} SubtitleTrack
  *
- * @typedef {{ name: string, lang: string }} AudioTrack
+ * @typedef {{ name: string, lang?: string, index?: number }} AudioTrack
  *
  * @typedef {{
  *   name: string,
@@ -46,6 +46,7 @@
  *   cdn: string,
  *   castable: boolean,
  *   resolveOn: 'device'|'any',
+ *   audioMode?: 'separate'|'tracks',
  *   voices?: Voice[],
  *   seasons?: Season[]
  * }} Source
@@ -128,6 +129,23 @@
   }
 
   /**
+   * Построить одну Voice-запись для audioMode="tracks":
+   * одна мастер-запись с audioTracks из массива имён.
+   *
+   * @param {Object.<string,string>} qualities  — мастер qualities (hls/dash)
+   * @param {string[]} names                   — имена озвучек (индекс = index в аудиодорожке)
+   * @param {SubtitleTrack[]} [subtitles]
+   * @returns {Voice}
+   */
+  function makeTracksVoice(qualities, names, subtitles) {
+    var firstName = (names && names.length) ? names[0] : 'Мультиаудио';
+    var audioTracks = (names || []).map(function (n, i) { return { name: n, index: i }; });
+    var voice = { name: firstName, id: 0, qualities: qualities, audioTracks: audioTracks };
+    if (subtitles && subtitles.length) voice.subtitles = subtitles;
+    return voice;
+  }
+
+  /**
    * Парсинг tracks:[{kind,label,src}] из ответа Alloha /bnsi/movies.
    * @param {Array} tracks
    * @returns {SubtitleTrack[]}
@@ -150,7 +168,8 @@
     subFormatFromUrl: subFormatFromUrl,
     rezkaParseSubtitles: rezkaParseSubtitles,
     collapsParseCC: collapsParseCC,
-    allohaParseTracksSubs: allohaParseTracksSubs
+    allohaParseTracksSubs: allohaParseTracksSubs,
+    makeTracksVoice: makeTracksVoice
   };
 
   if (typeof module !== 'undefined' && module.exports) {
@@ -519,13 +538,6 @@
       }
       if (opts.signal) fetchOpts.signal = opts.signal;
 
-      // Guard: в Lampa-WebView нет chrome.* и может не быть window.fetch —
-      // браузерный транспорт здесь не должен использоваться, но на случай
-      // ошибочного вызова — вернём rejected promise вместо ReferenceError.
-      if (typeof fetch === 'undefined') {
-        return Promise.reject(new Error('browserTransport: fetch недоступен (используйте lampaTransport в Lampa)'));
-      }
-
       return fetch(url, fetchOpts).then(function (r) {
         return {
           ok: r.ok,
@@ -610,6 +622,10 @@
     _schema = g.BalancerCore;
   }
 
+  function makeTracksVoice(q, names, subs) {
+    return _schema.makeTracksVoice(q, names, subs);
+  }
+
   function collapsParseCC(ccArr) {
     return _schema.collapsParseCC(ccArr);
   }
@@ -643,11 +659,7 @@
         var audioNames = (ep.audio && Array.isArray(ep.audio.names) && ep.audio.names.length)
           ? ep.audio.names : ['Основной'];
         var epSubs = collapsParseCC(ep.cc);
-        var voices = audioNames.map(function (n, idx) {
-          var v = { name: n, id: idx, qualities: q };
-          if (epSubs.length) v.subtitles = epSubs;
-          return v;
-        });
+        var voices = [ makeTracksVoice(q, audioNames, epSubs) ];
         episodes.push({ num: epNum, title: ep.title || ('Серия ' + epNum), voices: voices });
       });
       if (episodes.length) {
@@ -699,11 +711,7 @@
     }
 
     return {
-      voices: names.map(function (n, i) {
-        var v = { name: n, id: i, qualities: q };
-        if (filmSubs.length) v.subtitles = filmSubs;
-        return v;
-      })
+      voices: [ makeTracksVoice(q, names, filmSubs) ]
     };
   }
 
@@ -782,7 +790,7 @@
                              (parsed.serial && parsed.seasons && parsed.seasons.length));
           if (!ok && !isReserve) return tryUrl(reserveUrl, true);
           if (!ok) return { balancer: 'collaps', ok: false, error: 'контент не найден', cdn: 'interkh', castable: true, resolveOn: 'any' };
-          var src = { balancer: 'collaps', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any' };
+          var src = { balancer: 'collaps', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any', audioMode: 'tracks' };
           if (parsed.serial) {
             src.type = 'serial';
             src.seasons = parsed.seasons;
@@ -869,7 +877,7 @@
         var ok = parsed && ((parsed.voices && parsed.voices.length) ||
                            (parsed.serial && parsed.seasons && parsed.seasons.length));
         if (!ok) return { balancer: 'femd', ok: false, error: 'контент не найден', cdn: 'interkh', castable: true, resolveOn: 'any' };
-        var src = { balancer: 'femd', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any' };
+        var src = { balancer: 'femd', ok: true, cdn: 'interkh', castable: true, resolveOn: 'any', audioMode: 'tracks' };
         if (parsed.serial) {
           src.type = 'serial';
           src.seasons = parsed.seasons;
@@ -1130,7 +1138,7 @@
             });
             return { num: sNum, episodes: episodes };
           });
-          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', type: 'serial', seasons: seasons };
+          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'serial', seasons: seasons };
         }
 
         // ФИЛЬМ: разворачиваем все озвучки сразу
@@ -1143,7 +1151,7 @@
           var all = [];
           results.forEach(function (vs) { if (vs) vs.forEach(function (v) { all.push(v); }); });
           if (!all.length) return fail('не удалось декодировать ни одного потока');
-          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', type: 'movie', voices: all };
+          return { balancer: 'kodik', ok: true, cdn: 'solodcdn', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'movie', voices: all };
         });
       }).catch(function (e) {
         return fail(e);
@@ -1194,12 +1202,17 @@
   var ALLOHA_TOKEN = _secrets ? _secrets.TOK_ALLOHA_CRACKED : 'd317441359e505c343c2063edc97e7';
 
   // ─── Парсинг hlsSource из ответа /bnsi/movies ────────────────────────────────
+  // Возвращает одну voice с audioTracks (audioMode="tracks"):
+  // hlsSource[0] — мастер-поток (все дорожки в одном HLS); label = имя дорожки.
   function parseHlsSource(json, av1) {
     var hs = (json && json.hlsSource) || [];
     var rawTracks = (json && json.tracks) || [];
     var sharedSubs = _schema.allohaParseTracksSubs(rawTracks);
-    var voices = [];
-    hs.forEach(function (s) {
+
+    // Берём первый поток с URL как мастер (все качества из него)
+    var masterQ = null, masterName = null;
+    var audioTracks = [];
+    hs.forEach(function (s, idx) {
       var q = {}, qual = s.quality || {};
       Object.keys(qual).forEach(function (k) {
         var url = String(qual[k] || '').split(' or ')[0].trim();
@@ -1209,12 +1222,16 @@
         q[k + 'p'] = url;
       });
       if (Object.keys(q).length) {
-        var voice = { name: s.label || 'Alloha', id: s.label, qualities: q };
-        if (sharedSubs.length) voice.subtitles = sharedSubs;
-        voices.push(voice);
+        if (!masterQ) { masterQ = q; masterName = s.label || 'Alloha'; }
+        audioTracks.push({ name: s.label || ('Дорожка ' + (idx + 1)), index: idx });
       }
     });
-    return voices.length ? voices : null;
+
+    if (!masterQ) return null;
+
+    var voice = { name: masterName, id: masterName, qualities: masterQ, audioTracks: audioTracks };
+    if (sharedSubs.length) voice.subtitles = sharedSubs;
+    return [voice];
   }
 
   // ─── Получить поток через borth+bnsi (no-tab, для Node) ─────────────────────
@@ -1336,56 +1353,93 @@
             var episodes = eNums.map(function (eNum) {
               var epObj = eps[String(eNum)];
               var tr = (epObj && epObj.translation) || {};
-              var voices = Object.keys(tr).map(function (tid) {
-                var trObj = tr[tid];
-                if (!trObj || !trObj.iframe) return null;
-                var q = {};
-                q['плеер · iframe'] = trObj.iframe;
-                return { name: nameMap[tid] || trObj.name || ('Озвучка ' + tid), id: tid, qualities: q,
-                  // resolve() для ленивого borth-резолва
-                  resolveStream: function () { return fetchBnsiStream(trObj.iframe, transport); }
-                };
-              }).filter(Boolean);
-              return { num: eNum, title: 'Серия ' + eNum, voices: voices };
+              // audioMode="tracks": одна voice per серия с audioTracks по озвучкам
+              var tids = Object.keys(tr).filter(function (tid) { return tr[tid] && tr[tid].iframe; });
+              var epVoices = [];
+              if (tids.length) {
+                var masterTid = tids[0];
+                var masterTr  = tr[masterTid];
+                var masterUrl = masterTr.iframe;
+                var masterQ   = {};
+                masterQ['плеер · iframe'] = masterUrl;
+                var audioTracks = tids.map(function (tid, i) {
+                  var t = tr[tid];
+                  return {
+                    name: nameMap[tid] || t.name || ('Озвучка ' + tid),
+                    id: tid,
+                    index: i,
+                    resolveStream: (function (u) {
+                      return function () { return fetchBnsiStream(u, transport); };
+                    }(t.iframe))
+                  };
+                });
+                epVoices = [{
+                  name: nameMap[masterTid] || masterTr.name || ('Озвучка ' + masterTid),
+                  id: masterTid,
+                  qualities: masterQ,
+                  audioTracks: audioTracks,
+                  resolve: function () { return fetchBnsiStream(masterUrl, transport); }
+                }];
+              }
+              return { num: eNum, title: 'Серия ' + eNum, voices: epVoices };
             });
             return { num: sNum, episodes: episodes.filter(Boolean) };
           }).filter(function (s) { return s && s.episodes.length; });
           if (seasons.length) {
-            return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', type: 'serial', seasons: seasons };
+            return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', audioMode: 'tracks', type: 'serial', seasons: seasons };
           }
         }
 
-        // ФИЛЬМ: translation_iframe
-        var ti = d.data.translation_iframe, voices = [];
+        // ФИЛЬМ: translation_iframe → audioMode="tracks", одна voice + audioTracks
+        var ti = d.data.translation_iframe;
+        var masterVoice = null;
+
         if (ti && typeof ti === 'object') {
-          Object.keys(ti).forEach(function (k) {
-            var t = ti[k];
-            if (t && t.iframe) {
-              var iframeUrl = t.iframe;
-              var q = {};
-              q[(t.quality || 'плеер') + ' · iframe'] = iframeUrl;
-              voices.push({
+          var tiKeys = Object.keys(ti).filter(function (k) { return ti[k] && ti[k].iframe; });
+          if (tiKeys.length) {
+            // Первый ключ — мастер (его iframe идёт в qualities)
+            var masterKey = tiKeys[0];
+            var masterTi  = ti[masterKey];
+            var masterUrl = masterTi.iframe;
+            var masterQual = {};
+            masterQual[(masterTi.quality || 'плеер') + ' · iframe'] = masterUrl;
+
+            var audioTracks = tiKeys.map(function (k, i) {
+              var t = ti[k];
+              return {
                 name: t.name || ('Озвучка ' + k),
                 id: k,
-                qualities: q,
-                // Ленивый borth-резолв для качеств
-                resolve: function () { return fetchBnsiStream(iframeUrl, transport); }
-              });
-            }
-          });
+                index: i,
+                // ленивый resolve дорожки (borth на клик)
+                resolveStream: (function (u) {
+                  return function () { return fetchBnsiStream(u, transport); };
+                }(t.iframe))
+              };
+            });
+
+            masterVoice = {
+              name: masterTi.name || ('Озвучка ' + masterKey),
+              id: masterKey,
+              qualities: masterQual,
+              audioTracks: audioTracks,
+              resolve: function () { return fetchBnsiStream(masterUrl, transport); }
+            };
+          }
         }
-        if (!voices.length && d.data.iframe) {
+
+        if (!masterVoice && d.data.iframe) {
           var q0 = {};
           q0['плеер · iframe'] = d.data.iframe;
           var url0 = d.data.iframe;
-          voices.push({
+          masterVoice = {
             name: 'Плеер', id: 0, qualities: q0,
+            audioTracks: [{ name: 'Плеер', index: 0 }],
             resolve: function () { return fetchBnsiStream(url0, transport); }
-          });
+          };
         }
 
-        if (!voices.length) return fail('нет iframe в ответе apbugall');
-        return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', type: 'movie', voices: voices };
+        if (!masterVoice) return fail('нет iframe в ответе apbugall');
+        return { balancer: 'alloha', ok: true, cdn: 'vkvideo', castable: false, resolveOn: 'device', audioMode: 'tracks', type: 'movie', voices: [masterVoice] };
       }).catch(function (e) {
         return fail(e);
       });
@@ -1675,7 +1729,7 @@
                   result = rezkaSerialFromHtml(content, filmId, trs, favs, transport);
                 }
                 if (!result) throw new Error('не удалось распарсить структуру сериала');
-                return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', type: 'serial', seasons: result.seasons };
+                return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'serial', seasons: result.seasons };
               });
             }
 
@@ -1706,7 +1760,7 @@
             return Promise.all(voicePromises).then(function (vs) {
               var voices = vs.filter(Boolean);
               if (!voices.length) throw new Error('нет озвучек после get_movie');
-              return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', type: 'movie', voices: voices };
+              return { balancer: 'hdrezka', ok: true, cdn: 'voidboost', castable: true, resolveOn: 'any', audioMode: 'separate', type: 'movie', voices: voices };
             });
           });
         });
@@ -1845,7 +1899,7 @@
             });
             return { num: sNum, episodes: episodes };
           });
-          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', type: 'serial', seasons: seasons };
+          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', audioMode: 'separate', type: 'serial', seasons: seasons };
         }
 
         // ФИЛЬМ
@@ -1858,7 +1912,7 @@
         })).then(function (voices) {
           voices = voices.filter(Boolean);
           if (!voices.length) return fail('нет живых vkId или sources пусты');
-          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', type: 'movie', voices: voices };
+          return { balancer: 'cdnvideohub', ok: true, cdn: 'okcdn', castable: false, resolveOn: 'device', audioMode: 'separate', type: 'movie', voices: voices };
         });
       }).catch(function (e) {
         return fail(e);
@@ -2228,13 +2282,29 @@
  *   - Lampa.Manifest.plugins + Lampa.Listener.follow('full') + кнопка на карточке
  *   - this.filter(filter_items, choice) / this.append(item) / this.reset() / this.loading(bool)
  *   - this.renameQualityMap / this.getDefaultQuality (встроены в component Lampa)
- *   - Lampa.Player.play({ url, quality, subtitles, timeline, title })
+ *   - Lampa.Player.play({ url, quality, subtitles, timeline, title, translate })
  *   - Lampa.Player.playlist([...])
  *
  * Наш движок: BalancerCore.resolveAll(query, BalancerCore.lampaTransport) → ResolveResult
- *   sources[] → Source { balancer, ok, voices?, seasons?, castable, resolveOn }
+ *   sources[] → Source { balancer, ok, audioMode, voices?, seasons?, castable, resolveOn }
+ *
+ *   audioMode "separate" (Kodik/HDrezka/CDNVideoHub):
+ *     voices[] — несколько записей, у каждой свой qualities:{label:url}.
+ *     UI: список озвучек; выбор озвучки → перезагрузка потока.
+ *
+ *   audioMode "tracks" (Alloha/Collaps/femd):
+ *     voices[] — ОДНА запись { name, qualities:{мастер}, audioTracks:[{name,lang?,index}], subtitles? }.
+ *     UI: показываем ОДИН пункт потока; аудиодорожки передаём через translate.tracks в Player.
+ *
  *   Voice     { name, id, qualities:{label:url}, audioTracks?, subtitles? }
  *   Season    { num, episodes:[{ num, title, voices?, resolveLazy? }] }
+ *
+ * Субтитры: voice.subtitles:[{label,url}] передаём в Lampa.Player.play({subtitles}).
+ *           Встроенные в манифест Lampa берёт сам — их не дублируем.
+ *
+ * Аудиодорожки (tracks-режим): передаём translate:{tracks:[{language:name}]} по паттерну
+ *   online_mod.js collaps (строки 3578–3592): Lampa.Player использует это поле для подписи
+ *   аудиодорожек HLS-потока вместо автоматических «ru0/ru1» из манифеста.
  */
 
     'use strict';
@@ -2345,6 +2415,26 @@
     function audioInfo(audioTracks) {
         if (!audioTracks || !audioTracks.length) return '';
         return audioTracks.map(function (t) { return t.name || t.lang || ''; }).filter(Boolean).join(', ');
+    }
+
+    /**
+     * Преобразовать audioTracks нашей схемы в формат translate.tracks для Lampa.Player.
+     * Паттерн из online_mod.js collaps (строки 3463–3498, 3578–3592):
+     *   audio_tracks = [{language: name}]
+     *   Lampa.Player.play({ translate: { tracks: audio_tracks } })
+     *
+     * Это заставляет Lampa подписывать аудиодорожки HLS именами из tracks[].language
+     * вместо автоматически определённых из манифеста («ru0», «ru1» и т.п.).
+     *
+     * @param {Array|undefined} audioTracks  — [{name, lang?, index?}]
+     * @returns {Array|false}                — [{language: string}] или false
+     */
+    function mapAudioTracks(audioTracks) {
+        if (!audioTracks || !audioTracks.length) return false;
+        var out = audioTracks.map(function (t) {
+            return { language: t.name || t.lang || '' };
+        }).filter(function (t) { return t.language; });
+        return out.length ? out : false;
     }
 
     // ─── Компонент Lampa ──────────────────────────────────────────────────────
@@ -2477,60 +2567,157 @@
         /**
          * Фильм: показать строки озвучек; по клику — Lampa.Player.play.
          *
+         * Режим "separate" (Kodik/HDrezka/CDNVideoHub):
+         *   Каждая запись voices[] — отдельный поток со своим qualities.
+         *   Показываем N строк (по числу озвучек), клик = перезагрузка потока.
+         *
+         * Режим "tracks" (Alloha/Collaps/femd):
+         *   voices[] содержит ОДНУ запись с мастер-потоком и audioTracks[].
+         *   Показываем ОДИН пункт; аудиодорожки передаём через translate.tracks,
+         *   чтобы Lampa подписала их именами вместо «ru0/ru1» (паттерн online_mod.js).
+         *
          * @param {Source} source
          * @param {Object} movie
          * @param {string} title
          */
         function _buildVoiceLevel(source, movie, title) {
-            var voices = source.voices || [];
+            var voices    = source.voices || [];
+            var audioMode = source.audioMode || 'separate';
 
             if (!voices.length) {
                 _this.empty();
                 return;
             }
 
-            // Обновляем фильтр (голос) для шапки
-            filter_items.voice = voices.map(function (v) { return v.name; });
-            choice.voice       = 0;
-            _this.filter(filter_items, choice);
+            if (audioMode === 'tracks') {
+                // ── tracks: один поток, аудиодорожки внутри ──────────────────
+                var voice = voices[0];
+                _buildTracksItem(source, voice, movie, title);
+            } else {
+                // ── separate: N озвучек с разными потоками ────────────────────
+                filter_items.voice = voices.map(function (v) { return v.name; });
+                choice.voice       = 0;
+                _this.filter(filter_items, choice);
 
-            voices.forEach(function (voice) {
-                var atStr   = audioInfo(voice.audioTracks);
-                var qualStr = Object.keys(voice.qualities || {}).join(' / ') || '—';
-                var castMark = source.castable ? ' ✓' : '';
+                voices.forEach(function (voice) {
+                    var qualStr  = Object.keys(voice.qualities || {}).join(' / ') || '—';
+                    var castMark = source.castable ? ' ✓' : '';
+                    var subMark  = (voice.subtitles && voice.subtitles.length) ? ' [Sub]' : '';
 
-                var item = Lampa.Template.get('online_core_item', {
-                    title:   voice.name || 'Озвучка',
-                    quality: qualStr + castMark,
-                    info:    atStr ? ' · ' + atStr : ''
+                    var item = Lampa.Template.get('online_core_item', {
+                        title:   voice.name || 'Озвучка',
+                        quality: qualStr + castMark,
+                        info:    subMark
+                    });
+
+                    item.on('hover:enter', function () {
+                        _playSeparateVoice(voice, title, movie);
+                    });
+
+                    _this.append(item);
                 });
-
-                item.on('hover:enter', function () {
-                    var url = getDefaultQuality(voice.qualities);
-                    if (!url) {
-                        Lampa.Noty.show('Нет потока для этой озвучки');
-                        return;
-                    }
-
-                    var playerItem = {
-                        url:       url,
-                        quality:   renameQualityMap(voice.qualities),
-                        subtitles: mapSubtitles(voice.subtitles),
-                        title:     title + (voice.name ? ' / ' + voice.name : ''),
-                        timeline:  Lampa.Timeline.view(
-                            Lampa.Utils.hash(title + String(voice.id || voice.name))
-                        )
-                    };
-
-                    if (movie && movie.id) Lampa.Favorite.add('history', movie, 100);
-                    Lampa.Player.play(playerItem);
-                    Lampa.Player.playlist([playerItem]);
-                });
-
-                _this.append(item);
-            });
+            }
 
             _this.start(true);
+        }
+
+        /**
+         * Построить и добавить ОДИН пункт для tracks-режима (фильм).
+         * Играем мастер-поток; аудиодорожки передаём через translate.tracks.
+         *
+         * @param {Source} source
+         * @param {Voice}  voice   — единственная запись voices[0]
+         * @param {Object} movie
+         * @param {string} title
+         */
+        function _buildTracksItem(source, voice, movie, title) {
+            var atStr    = audioInfo(voice.audioTracks);
+            var qualStr  = Object.keys(voice.qualities || {}).join(' / ') || '—';
+            var castMark = source.castable ? ' ✓' : '';
+            var subMark  = (voice.subtitles && voice.subtitles.length) ? ' [Sub]' : '';
+
+            var item = Lampa.Template.get('online_core_item', {
+                title:   title || 'Смотреть',
+                quality: qualStr + castMark,
+                info:    (atStr ? ' · ' + atStr : '') + subMark
+            });
+
+            item.on('hover:enter', function () {
+                _playTracksVoice(voice, title, movie);
+            });
+
+            _this.append(item);
+        }
+
+        /**
+         * Воспроизвести озвучку в режиме "separate" (отдельный поток для каждой озвучки).
+         *
+         * @param {Voice}  voice
+         * @param {string} title
+         * @param {Object} movie
+         */
+        function _playSeparateVoice(voice, title, movie) {
+            var url = getDefaultQuality(voice.qualities);
+            if (!url) {
+                Lampa.Noty.show('Нет потока для этой озвучки');
+                return;
+            }
+
+            var playerItem = {
+                url:       url,
+                quality:   renameQualityMap(voice.qualities),
+                subtitles: mapSubtitles(voice.subtitles),
+                title:     title + (voice.name ? ' / ' + voice.name : ''),
+                timeline:  Lampa.Timeline.view(
+                    Lampa.Utils.hash(title + String(voice.id || voice.name))
+                )
+            };
+
+            if (movie && movie.id) Lampa.Favorite.add('history', movie, 100);
+            Lampa.Player.play(playerItem);
+            Lampa.Player.playlist([playerItem]);
+        }
+
+        /**
+         * Воспроизвести в режиме "tracks" (один поток + аудиодорожки).
+         * Передаём translate.tracks — паттерн online_mod.js collaps:
+         *   Lampa.Player.play({ ..., translate: { tracks: [{language: name}] } })
+         * Lampa использует tracks[i].language как подпись i-й аудиодорожки HLS.
+         *
+         * Субтитры: voice.subtitles (внешние файлы) → subtitles:[{label,url}].
+         *
+         * @param {Voice}  voice   — единственная запись voices[0]
+         * @param {string} title
+         * @param {Object} movie
+         */
+        function _playTracksVoice(voice, title, movie) {
+            var url = getDefaultQuality(voice.qualities);
+            if (!url) {
+                Lampa.Noty.show('Нет потока');
+                return;
+            }
+
+            var atracks = mapAudioTracks(voice.audioTracks);
+
+            var playerItem = {
+                url:       url,
+                quality:   renameQualityMap(voice.qualities),
+                subtitles: mapSubtitles(voice.subtitles),
+                title:     title,
+                timeline:  Lampa.Timeline.view(
+                    Lampa.Utils.hash(title + String(voice.id || voice.name || 'tracks'))
+                )
+            };
+
+            // translate.tracks — имена аудиодорожек (паттерн online_mod.js collaps, строки 3578–3592).
+            // Если дорожки есть — добавляем; если нет — Lampa берёт из манифеста.
+            if (atracks) {
+                playerItem.translate = { tracks: atracks };
+            }
+
+            if (movie && movie.id) Lampa.Favorite.add('history', movie, 100);
+            Lampa.Player.play(playerItem);
+            Lampa.Player.playlist([playerItem]);
         }
 
         // ── Уровень 2б: сериал → фильтр озвучка/сезон + серии ────────────────
@@ -2538,6 +2725,8 @@
         /**
          * Сериал: построить фильтр (озвучка / сезон) и список серий.
          * Паттерн online_mod.js — filter_items.voice + filter_items.season_num.
+         *
+         * audioMode учитывается при воспроизведении серии (_playEpisode).
          *
          * @param {Source} source
          * @param {Object} movie
@@ -2551,7 +2740,7 @@
             }
 
             // Собираем имена озвучек из первых доступных серий
-            var voiceNames = _collectVoiceNames(seasons);
+            var voiceNames = _collectVoiceNames(seasons, source.audioMode);
             if (!voiceNames.length) voiceNames = ['По умолчанию'];
 
             // Инициализируем фильтр
@@ -2576,16 +2765,33 @@
         /**
          * Собрать уникальные имена озвучек из первых серий (у кого voices уже есть).
          *
+         * В режиме "tracks" озвучки = аудиодорожки внутри потока; имена берём из audioTracks[].
+         * В режиме "separate" имена берём из voices[].name.
+         *
          * @param {Season[]} seasons
+         * @param {string}   audioMode
          * @returns {string[]}
          */
-        function _collectVoiceNames(seasons) {
+        function _collectVoiceNames(seasons, audioMode) {
             var names = [];
             seasons.forEach(function (season) {
                 (season.episodes || []).forEach(function (ep) {
-                    (ep.voices || []).forEach(function (v) {
-                        if (names.indexOf(v.name) === -1) names.push(v.name);
-                    });
+                    var voices = ep.voices || [];
+                    if (audioMode === 'tracks') {
+                        // Один поток: дорожки из voices[0].audioTracks
+                        var v0 = voices[0];
+                        if (v0 && v0.audioTracks) {
+                            v0.audioTracks.forEach(function (t) {
+                                var n = t.name || t.lang || '';
+                                if (n && names.indexOf(n) === -1) names.push(n);
+                            });
+                        }
+                    } else {
+                        // Separate: каждая запись voices — отдельная озвучка
+                        voices.forEach(function (v) {
+                            if (v.name && names.indexOf(v.name) === -1) names.push(v.name);
+                        });
+                    }
                 });
             });
             return names;
@@ -2626,7 +2832,7 @@
                 item.on('hover:enter', function () {
                     if (episode.voices && episode.voices.length) {
                         // Озвучки уже резолвлены — играем сразу
-                        _playEpisode(episode.voices, voiceIdx, title, epLabel, season, episode, movie);
+                        _playEpisode(episode.voices, voiceIdx, title, epLabel, season, episode, movie, source.audioMode);
                     } else if (typeof episode.resolveLazy === 'function') {
                         // Ленивый резолв (Kodik/Alloha/HDrezka) — тянем по клику
                         _this.loading(true);
@@ -2634,7 +2840,7 @@
                             .then(function (voices) {
                                 _this.loading(false);
                                 episode.voices = voices; // кешируем
-                                _playEpisode(voices, voiceIdx, title, epLabel, season, episode, movie);
+                                _playEpisode(voices, voiceIdx, title, epLabel, season, episode, movie, source.audioMode);
                             })
                             .catch(function (e) {
                                 _this.loading(false);
@@ -2655,7 +2861,14 @@
 
         /**
          * Запустить плеер для конкретной серии.
-         * Маппинг Voice → Lampa.Player.play / playlist по паттерну online_mod.js.
+         *
+         * audioMode "separate": выбираем voices[voiceIdx] — у него свой поток.
+         * audioMode "tracks":   берём voices[0] (один мастер-поток); voiceIdx используется
+         *   для установки активной дорожки (пока передаём все треки через translate.tracks,
+         *   выбор конкретной дорожки по умолчанию — на стороне Lampa/плеера).
+         *
+         * Субтитры: voice.subtitles (внешние файлы) передаём в playerItem.subtitles.
+         * Встроенные в HLS-манифест Lampa берёт сама — не дублируем.
          *
          * @param {Voice[]} voices
          * @param {number}  voiceIdx
@@ -2664,10 +2877,19 @@
          * @param {Season}  season
          * @param {Episode} episode
          * @param {Object}  movie
+         * @param {string}  audioMode   — "separate" | "tracks"
          */
-        function _playEpisode(voices, voiceIdx, movieTitle, epLabel, season, episode, movie) {
-            // Если выбранный индекс вышел за границы — берём первый
-            var voice = voices[voiceIdx] || voices[0];
+        function _playEpisode(voices, voiceIdx, movieTitle, epLabel, season, episode, movie, audioMode) {
+            var voice;
+
+            if (audioMode === 'tracks') {
+                // Один мастер-поток; voiceIdx не влияет на выбор голоса
+                voice = voices[0];
+            } else {
+                // Separate: каждая запись voices — свой поток
+                voice = voices[voiceIdx] || voices[0];
+            }
+
             if (!voice) {
                 Lampa.Noty.show('Нет потока для этой серии');
                 return;
@@ -2680,16 +2902,25 @@
             }
 
             var playerTitle = movieTitle + ' / ' + epLabel +
-                              (voice.name ? ' / ' + voice.name : '');
-            var playerItem  = {
+                              (audioMode !== 'tracks' && voice.name ? ' / ' + voice.name : '');
+
+            var playerItem = {
                 url:       url,
                 quality:   renameQualityMap(voice.qualities),
                 subtitles: mapSubtitles(voice.subtitles),
                 title:     playerTitle,
                 timeline:  Lampa.Timeline.view(
-                    Lampa.Utils.hash([movieTitle, season.num, episode.num, voice.name || ''].join(':'))
+                    Lampa.Utils.hash([movieTitle, season.num, episode.num, audioMode !== 'tracks' ? (voice.name || '') : 'tracks'].join(':'))
                 )
             };
+
+            // tracks-режим: имена аудиодорожек → translate.tracks (паттерн online_mod.js collaps).
+            if (audioMode === 'tracks') {
+                var atracks = mapAudioTracks(voice.audioTracks);
+                if (atracks) {
+                    playerItem.translate = { tracks: atracks };
+                }
+            }
 
             if (movie && movie.id) Lampa.Favorite.add('history', movie, 100);
             Lampa.Player.play(playerItem);

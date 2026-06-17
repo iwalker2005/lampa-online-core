@@ -44,13 +44,6 @@
       }
       if (opts.signal) fetchOpts.signal = opts.signal;
 
-      // Guard: в Lampa-WebView нет chrome.* и может не быть window.fetch —
-      // браузерный транспорт здесь не должен использоваться, но на случай
-      // ошибочного вызова — вернём rejected promise вместо ReferenceError.
-      if (typeof fetch === 'undefined') {
-        return Promise.reject(new Error('browserTransport: fetch недоступен (используйте lampaTransport в Lampa)'));
-      }
-
       return fetch(url, fetchOpts).then(function (r) {
         return {
           ok: r.ok,
