@@ -686,9 +686,10 @@
       return parseMakePlayerSerial(html, seasonsIdx);
     }
 
-    // Фильм
-    var mHls  = html.match(/["']?hls["']?\s*:\s*["'](https?:[^"']+\.m3u8[^"']*)["']/i);
-    var mDash = html.match(/["']?dash["']?\s*:\s*["'](https?:[^"']+\.mpd[^"']*)["']/i);
+    // Фильм. URL может быть БЕЗ расширения .m3u8/.mpd — interkh отдаёт
+    // «директорные» ссылки (напр. https://xxx.interkh.com/.../KVP26X5F/).
+    var mHls  = html.match(/["']?hls["']?\s*:\s*["'](https?:[^"']+)["']/i);
+    var mDash = html.match(/["']?dash["']?\s*:\s*["'](https?:[^"']+)["']/i);
     if (!mHls && !mDash) return null;
 
     var names = ['Основной'];
@@ -2240,10 +2241,10 @@
           nativeHeaders = directHeaders;
         }
 
-        // apbugall (CORS:*) и плеер-домены Alloha (stravers.*) воркер не проксирует
-        // (Malformed URL) → зовём напрямую. На Android (нет CORS) это рабочий путь;
-        // в браузере stravers без CORS всё равно недоступен.
-        var direct = opts.noProxy || /apbugall\.org|stravers\.|\.allarknet\.|\bbnsi\b/i.test(url);
+        // Домены с ОТКРЫТЫМ CORS (api.* балансёров) — всегда напрямую: воркер
+        // nb557/fx666 их отвергает ("Malformed URL"), а сами они отдают CORS:*.
+        // stravers/allarknow (плеер Alloha) — тоже напрямую (рабочий путь на Android).
+        var direct = opts.noProxy || /apbugall\.org|kinogram\.best|synchroncode\.com|femd\.ws|kodik-api\.com|plapi\.cdnvideohub\.com|stravers\.|allarknow\.|\.allarknet\.|\bbnsi\b/i.test(url);
         var finalUrl = (proxy && !direct) ? proxyLink(url, proxy, proxy_enc, 'enc2t') : url;
 
         // Тело POST (false → нет тела, как принято в online_mod.js)
