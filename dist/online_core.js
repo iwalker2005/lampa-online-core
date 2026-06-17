@@ -1072,11 +1072,14 @@
       if (query.kp) {
         searchUrl = 'https://kodik-api.com/search?kinopoisk_id=' + encodeURIComponent(query.kp) +
           '&token=' + token + '&with_seasons=true&with_episodes=true&limit=100';
+      } else if (query.imdb) {
+        searchUrl = 'https://kodik-api.com/search?imdb_id=' + encodeURIComponent(query.imdb) +
+          '&token=' + token + '&with_seasons=true&with_episodes=true&limit=100';
       } else if (query.title) {
         searchUrl = 'https://kodik-api.com/search?title=' + encodeURIComponent(query.title) +
           '&token=' + token + '&with_seasons=true&with_episodes=true&limit=100';
       } else {
-        return Promise.resolve(fail('нужен kp или title'));
+        return Promise.resolve(fail('нужен kp, imdb или title'));
       }
 
       return transport.fetch(searchUrl, {}).then(function (r) {
@@ -2480,8 +2483,10 @@
         this.search = function () {
             var movie  = object.movie || {};
             var query  = {
-                kp:    String(movie.kinopoisk_id || movie.id || ''),
-                title: movie.title || movie.original_title || object.search || '',
+                // ВНИМАНИЕ: movie.id у TMDB-карточки — это TMDB-id, а НЕ kinopoisk_id.
+                // Подставлять его в kp нельзя — балансеры искали по чужому id → «Пусто».
+                kp:    String(movie.kinopoisk_id || movie.kinopoisk || ''),
+                title: movie.title || movie.name || movie.original_title || movie.original_name || object.search || '',
                 imdb:  movie.imdb_id || ''
             };
 
@@ -2495,7 +2500,11 @@
                     _okSources = (result.sources || []).filter(function (s) { return s.ok; });
 
                     if (!_okSources.length) {
-                        _this.empty();
+                        var reasons = (result.sources || []).map(function (s) {
+                            return s.balancer + ' — ' + (s.error || 'нет данных');
+                        }).join('   |   ');
+                        _this.empty('Источники ничего не нашли. kp=' + (query.kp || '—') +
+                            ', imdb=' + (query.imdb || '—') + ', «' + query.title + '».   ' + reasons);
                         return;
                     }
 
