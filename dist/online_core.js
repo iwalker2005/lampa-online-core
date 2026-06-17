@@ -2110,10 +2110,10 @@
 
   function _getProxy() {
     if (_customProxy) return _customProxy;
-    // Ротация: нечётный час → nb557, чётный → fx666 (как в online_mod.js)
-    return new Date().getHours() % 2
-      ? 'https://cors.nb557.workers.dev/'
-      : 'https://cors.fx666.workers.dev/';
+    // koyeb-прокси (apn-mb556) — единственный, кто реально проксирует балансёрные
+    // домены (kodikplayer и пр.); воркеры nb557/fx666 их отвергают ("Malformed URL").
+    // Формат enc2t совпадает. Минус — холодный старт free-tier 3–10с (бывает 000).
+    return 'https://apn-mb556.koyeb.app/apn/';
   }
 
   // ── Базовый User-Agent ────────────────────────────────────────────────────────
@@ -2250,7 +2250,12 @@
         // Домены с ОТКРЫТЫМ CORS (api.* балансёров) — всегда напрямую: воркер
         // nb557/fx666 их отвергает ("Malformed URL"), а сами они отдают CORS:*.
         // stravers/allarknow (плеер Alloha) — тоже напрямую (рабочий путь на Android).
-        var direct = opts.noProxy || /apbugall\.org|synchroncode\.com|ortified\.ws|embess\.ws|kinogram\.best|femd\.ws|kodik-api\.com|kodikplayer\.com|kodikres\.com|solodcdn\.com|plapi\.cdnvideohub\.com|hdrezka\.me|rezka\.ag|stravers\.|allarknow\.|\.allarknet\.|\bbnsi\b/i.test(url);
+        // Open-CORS API балансёров — всегда напрямую (играют и в браузере, и на Android).
+        var openCors = /apbugall\.org|synchroncode\.com|ortified\.ws|embess\.ws|kinogram\.best|femd\.ws|kodik-api\.com|plapi\.cdnvideohub\.com/i.test(url);
+        // Защищённые домены (без CORS): на Android — напрямую (нативный TLS);
+        // в браузере — через koyeb (он тянет kodikplayer; stravers/hdrezka JA3 — не вытянет).
+        var protectedHost = /kodikplayer\.com|kodikres\.com|solodcdn\.com|stravers\.|allarknow\.|\.allarknet\.|hdrezka\.me|rezka\.ag|\bbnsi\b/i.test(url);
+        var direct = opts.noProxy || openCors || (isAndroid && protectedHost);
         var finalUrl = (proxy && !direct) ? proxyLink(url, proxy, proxy_enc, 'enc2t') : url;
 
         // Тело POST (false → нет тела, как принято в online_mod.js)
