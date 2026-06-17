@@ -2619,6 +2619,17 @@
                 _this.append(row);
             });
 
+            // Диагностика: показать и УПАВШИЕ балансёры с причиной (для отладки).
+            (_result && _result.sources || []).forEach(function (s) {
+                if (s.ok) return;
+                var row = Lampa.Template.get('online_core_folder', {
+                    title:   '✗ ' + s.balancer,
+                    quality: 'ошибка',
+                    info:    ' — ' + (s.error || 'нет данных')
+                });
+                _this.append(row);
+            });
+
             _this.start(true);
         }
 
