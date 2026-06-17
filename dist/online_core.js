@@ -1057,6 +1057,27 @@
     },
 
     /**
+     * Добыть kinopoisk_id по imdb/названию (ответ Kodik содержит kinopoisk_id).
+     * Нужно, когда карточка пришла из TMDB и KP-id неизвестен.
+     * @returns {Promise<string>}  kinopoisk_id или ''
+     */
+    resolveKpId: function (query, transport) {
+      var token = _secrets.deriveToken('kodik');
+      var url;
+      if (query.imdb)       url = 'https://kodik-api.com/search?imdb_id=' + encodeURIComponent(query.imdb) + '&token=' + token + '&limit=1';
+      else if (query.title) url = 'https://kodik-api.com/search?title='   + encodeURIComponent(query.title) + '&token=' + token + '&limit=1';
+      else return Promise.resolve('');
+
+      return transport.fetch(url, {}).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (d) {
+        var res = d && d.results && d.results[0];
+        return (res && res.kinopoisk_id) ? String(res.kinopoisk_id) : '';
+      }).catch(function () { return ''; });
+    },
+
+    /**
      * @param {{ kp?: string, title?: string }} query
      * @param {object} transport
      * @returns {Promise<import('../schema.js').Source>}
@@ -1980,29 +2001,39 @@
    * @returns {Promise<ResolveResult>}
    */
   function resolveAll(query, transport) {
-    var promises = adapters.map(function (adapter) {
-      return adapter.resolve(query, transport).catch(function (e) {
+    // Шаг 0: если нет kinopoisk_id (TMDB-карточка) — добываем его через Kodik,
+    // иначе 5 из 6 балансеров вернут «kp обязателен».
+    var pre = (!query.kp && (query.imdb || query.title))
+      ? _kodik.kodikAdapter.resolveKpId(query, transport).then(function (kp) {
+          return kp ? { kp: kp, title: query.title, imdb: query.imdb } : query;
+        })
+      : Promise.resolve(query);
+
+    return pre.then(function (q) {
+      var promises = adapters.map(function (adapter) {
+        return adapter.resolve(q, transport).catch(function (e) {
+          return {
+            balancer: adapter.id,
+            ok: false,
+            error: String(e && e.message || e),
+            cdn: adapter.capabilities.cdn,
+            castable: adapter.capabilities.castable,
+            resolveOn: adapter.capabilities.resolveOn
+          };
+        });
+      });
+
+      return Promise.all(promises).then(function (sources) {
+        // Определяем тип контента из первого ok-источника
+        var firstOk = sources.find(function (s) { return s.ok; });
+        var type = (firstOk && firstOk.type) || 'movie';
+
         return {
-          balancer: adapter.id,
-          ok: false,
-          error: String(e && e.message || e),
-          cdn: adapter.capabilities.cdn,
-          castable: adapter.capabilities.castable,
-          resolveOn: adapter.capabilities.resolveOn
+          query: q,
+          type: type,
+          sources: sources
         };
       });
-    });
-
-    return Promise.all(promises).then(function (sources) {
-      // Определяем тип контента из первого ok-источника
-      var firstOk = sources.find(function (s) { return s.ok; });
-      var type = (firstOk && firstOk.type) || 'movie';
-
-      return {
-        query: query,
-        type: type,
-        sources: sources
-      };
     });
   }
 
