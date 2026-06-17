@@ -1271,11 +1271,13 @@
     var playerOrigin;
     try { playerOrigin = new URL(iframeUrl).origin; } catch (e) { playerOrigin = 'https://larkin-as.stravers.live'; }
 
-    // Шаг 2: GET iframe HTML → viewporti
+    // Шаг 2: GET iframe HTML → viewporti.
+    // КРИТИЧНО (borth-server-side.md, стр.165): viewporti привязан к набору
+    // заголовков GET. Лишние (Accept-Language, доп. Accept, creds) → сервер
+    // сгенерит другой viewporti → POST borth получит 404. Минимум: Referer + Accept: text/html.
     return transport.fetch(iframeUrl, {
       referer: playerOrigin + '/',
-      creds: true,
-      headers: { 'Accept': 'text/html,application/xhtml+xml' }
+      headers: { 'Accept': 'text/html' }
     }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status + ' на плеере');
       return r.text();
@@ -2250,12 +2252,13 @@
         // Домены с ОТКРЫТЫМ CORS (api.* балансёров) — всегда напрямую: воркер
         // nb557/fx666 их отвергает ("Malformed URL"), а сами они отдают CORS:*.
         // stravers/allarknow (плеер Alloha) — тоже напрямую (рабочий путь на Android).
-        // Open-CORS API балансёров — всегда напрямую (играют и в браузере, и на Android).
-        var openCors = /apbugall\.org|synchroncode\.com|ortified\.ws|embess\.ws|kinogram\.best|femd\.ws|kodik-api\.com|plapi\.cdnvideohub\.com/i.test(url);
-        // Защищённые домены (без CORS): на Android — напрямую (нативный TLS);
-        // в браузере — через koyeb (он тянет kodikplayer; stravers/hdrezka JA3 — не вытянет).
-        var protectedHost = /kodikplayer\.com|kodikres\.com|solodcdn\.com|stravers\.|allarknow\.|\.allarknet\.|hdrezka\.me|rezka\.ag|\bbnsi\b/i.test(url);
-        var direct = opts.noProxy || openCors || (isAndroid && protectedHost);
+        // Open-CORS API + Alloha-фронты (stravers/allarknow: прямой GET работает,
+        // а koyeb их НЕ тянет — отдаёт заглушку) → всегда напрямую.
+        var alwaysDirect = /apbugall\.org|synchroncode\.com|ortified\.ws|embess\.ws|kinogram\.best|femd\.ws|kodik-api\.com|plapi\.cdnvideohub\.com|stravers\.|allarknow\.|\.allarknet\.|\bbnsi\b/i.test(url);
+        // kodikplayer/CDN/hdrezka — без CORS: на Android напрямую (нативный TLS),
+        // в браузере через koyeb (его он тянет, в отличие от воркеров nb557/fx666).
+        var viaKoyebInBrowser = /kodikplayer\.com|kodikres\.com|solodcdn\.com|hdrezka\.me|rezka\.ag/i.test(url);
+        var direct = opts.noProxy || alwaysDirect || (isAndroid && viaKoyebInBrowser);
         var finalUrl = (proxy && !direct) ? proxyLink(url, proxy, proxy_enc, 'enc2t') : url;
 
         // Тело POST (false → нет тела, как принято в online_mod.js)
